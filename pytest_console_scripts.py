@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import traceback
+import json
 
 import mock
 import py.path
@@ -18,6 +19,26 @@ if sys.version_info.major == 2:
     StreamMock = StringIO.StringIO
 else:
     StreamMock = io.StringIO
+
+
+_SCRIPT_LOG_TEMPLATE = """
+============================================
+========== SCRIPT RUNNING SUMMARY ==========
+============================================
+Command: {0}
+Environment: {1}
+Stdin: {2}
+=============== SCRIPT OUTPUT ==============
+{3}
+"""
+
+_SCRIPT_OUTPUT_TEMPLATE = """
+Return code: {0}
+------------------ STDOUT ------------------
+{1}
+------------------ STDERR ------------------
+{2}
+"""
 
 
 def pytest_addoption(parser):
@@ -86,6 +107,10 @@ class RunResult(object):
         self.stdout = stdout
         self.stderr = stderr
 
+    def __str__(self):
+        return _SCRIPT_OUTPUT_TEMPLATE.format(self.returncode, self.stdout,
+                                              self.stderr)
+
 
 class ScriptRunner(object):
     """Fixture for running python scripts under test."""
@@ -151,6 +176,28 @@ class ScriptRunner(object):
                              **options)
         stdout, stderr = p.communicate(stdin)
         return RunResult(p.returncode, stdout, stderr)
+
+    def _log_script_status(self, command, run_result, **kw):
+        """Write the status of the script to `stdout`, in a pre-defined format.
+
+        This logging will only become visible if the test that runs the script
+        fails or if `stdout` suppressing is turned off from `pytest`.
+
+        Parameters
+        ----------
+        command: iterable
+            The command that was run.
+        run_result: RunResult
+            The result of running the script.
+
+        """
+        env = json.dumps(kw.get('env', os.environ))
+        stdin_stream = kw.get('stdin', None)
+        stdin_str = stdin_stream.read() if stdin_stream else None
+        cmd_str = ' '.join(command)
+        output = str(run_result)
+
+        print(_SCRIPT_LOG_TEMPLATE.format(cmd_str, env, stdin_str, output))
 
 
 @pytest.fixture
