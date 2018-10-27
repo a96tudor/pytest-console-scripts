@@ -1,11 +1,14 @@
 import os
 import subprocess
 import sys
+import json
 
 import mock
 import py
 import pytest
 import virtualenv
+
+from pytest_console_scripts import SCRIPT_LOG_TEMPLATE, SCRIPT_OUTPUT_TEMPLATE
 
 
 # Template for creating setup.py for installing console scripts.
@@ -39,7 +42,7 @@ class VEnvWrapper:
     def run(self, cmd, *args, **kw):
         """Run a command in the virtualenv."""
         self._update_env(kw.setdefault('env', os.environ))
-        print(kw['env']['PATH'], kw['env']['PYTHONPATH'])
+        #print(kw['env']['PATH'], kw['env']['PYTHONPATH'])
         subprocess.check_call(cmd, *args, **kw)
 
     def install_console_script(self, cmd, script_path):
@@ -232,3 +235,47 @@ def test_cwd(script_runner):
     assert ret.stdout == '{cwd}\n'
         """.format(cwd=tmpdir),
     )
+
+
+_FAILING_TEST_TMP = r"""
+import pytest
+
+@pytest.mark.script_launch_mode('{launch}')
+def failing_test(script_runner):
+    script_runner.run('console-script', '{arg}')
+    assert True
+"""
+
+_SCRIPT = """
+import sys
+
+def main():
+    arg = sys.argv[1]
+    if arg == 'fail':
+        sys.exit('boom')
+    sys.stdout.write(arg)
+    sys.stderr.write(arg)
+"""
+
+
+@pytest.mark.parametrize('all_args', [
+    {'launch': 'inprocess', 'arg': 'foo', 'stdin': None,
+     'stdout': 'foo', 'stderr': 'foo', 'returncode': 0, 
+     'env': json.dumps(dict(os.environ))},
+    {'launch': 'subprocess', 'arg': 'foo', 'stdin': None,
+     'stdout': 'foo', 'stderr': 'foo', 'returncode': 0, 
+     'env': json.dumps(dict(os.environ))},
+    {'launch': 'inprocess', 'arg': 'fail', 'stdin': None,
+     'stdout': '', 'stderr': 'boom', 'returncode': 1, 
+     'env': json.dumps(dict(os.environ))},
+])
+def test_script_report_at_failure(test_script_in_venv, all_args):
+    all_args['out'] = SCRIPT_OUTPUT_TEMPLATE.format(**all_args)
+    all_args['cmd'] = ' '.join(['console-script', all_args['arg']])
+    exp_output = SCRIPT_LOG_TEMPLATE.format(**all_args)
+
+    with pytest.raises(subprocess.CalledProcessError) as err:
+        test_script_in_venv(_SCRIPT, _FAILING_TEST_TMP.format(**all_args),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    assert exp_output in err.value.stderr

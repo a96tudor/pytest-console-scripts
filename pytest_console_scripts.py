@@ -21,23 +21,24 @@ else:
     StreamMock = io.StringIO
 
 
-_SCRIPT_LOG_TEMPLATE = """
+SCRIPT_LOG_TEMPLATE = """
 ============================================
 ========== SCRIPT RUNNING SUMMARY ==========
 ============================================
-Command: {0}
-Environment: {1}
-Stdin: {2}
+Command: {cmd}
+Launch mode: {launch}
+Environment: {env}
+Stdin: {stdin}
 =============== SCRIPT OUTPUT ==============
-{3}
+{out}
 """
 
-_SCRIPT_OUTPUT_TEMPLATE = """
-Return code: {0}
+SCRIPT_OUTPUT_TEMPLATE = """
+Return code: {returncode}
 ------------------ STDOUT ------------------
-{1}
+{stdout}
 ------------------ STDERR ------------------
-{2}
+{stderr}
 """
 
 
@@ -108,8 +109,10 @@ class RunResult(object):
         self.stderr = stderr
 
     def __str__(self):
-        return _SCRIPT_OUTPUT_TEMPLATE.format(self.returncode, self.stdout,
-                                              self.stderr)
+        return SCRIPT_OUTPUT_TEMPLATE.format(
+            **{'returncode': self.returncode, 'stdout': self.stdout,
+               'stderr': self.stderr},
+        )
 
 
 class ScriptRunner(object):
@@ -125,8 +128,11 @@ class ScriptRunner(object):
 
     def run(self, command, *arguments, **options):
         if self.launch_mode == 'inprocess':
-            return self.run_inprocess(command, *arguments, **options)
-        return self.run_subprocess(command, *arguments, **options)
+            result =  self.run_inprocess(command, *arguments, **options)
+        else:
+            result = self.run_subprocess(command, *arguments, **options)
+        self._log_script_status(command, result, *arguments, **options)
+        return result
 
     def run_inprocess(self, command, *arguments, **options):
         cmdargs = [command] + list(arguments)
@@ -177,7 +183,7 @@ class ScriptRunner(object):
         stdout, stderr = p.communicate(stdin)
         return RunResult(p.returncode, stdout, stderr)
 
-    def _log_script_status(self, command, run_result, **kw):
+    def _log_script_status(self, command, run_result, *args, **kw):
         """Write the status of the script to `stdout`, in a pre-defined format.
 
         This logging will only become visible if the test that runs the script
@@ -185,19 +191,21 @@ class ScriptRunner(object):
 
         Parameters
         ----------
-        command: iterable
+        command: str
             The command that was run.
         run_result: RunResult
             The result of running the script.
 
         """
-        env = json.dumps(kw.get('env', os.environ))
+        env = json.dumps(kw.get('env', dict(os.environ)))
         stdin_stream = kw.get('stdin', None)
         stdin_str = stdin_stream.read() if stdin_stream else None
-        cmd_str = ' '.join(command)
-        output = str(run_result)
+        cmd_str = ' '.join([command] + list(args))
 
-        print(_SCRIPT_LOG_TEMPLATE.format(cmd_str, env, stdin_str, output))
+        print(SCRIPT_LOG_TEMPLATE.format(
+            **{'cmd': cmd_str, 'env': env, 'stdin': stdin_str,
+               'out': run_result, 'launch': self.launch_mode},
+        ))
 
 
 @pytest.fixture
